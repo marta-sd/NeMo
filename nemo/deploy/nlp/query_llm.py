@@ -85,6 +85,7 @@ class NemoQueryLLMPyTorch(NemoQueryLLMBase):
         max_length: Optional[int] = None,
         apply_chat_template: bool = False,
         init_timeout: float = 60.0,
+        n_top_logprobs: Optional[int] = None,
     ):
         """
         Query the Triton server synchronously and return a list of responses.
@@ -133,6 +134,8 @@ class NemoQueryLLMPyTorch(NemoQueryLLMBase):
             inputs["max_length"] = np.full(prompts.shape, max_length, dtype=np.int_)
         if apply_chat_template is not None:
             inputs["apply_chat_template"] = np.full(prompts.shape, apply_chat_template, dtype=np.bool_)
+        if n_top_logprobs is not None:
+            inputs["n_top_logprobs"] = np.full(prompts.shape, n_top_logprobs, dtype=np.int_)
 
         with ModelClient(self.url, self.model_name, init_timeout_s=init_timeout, inference_timeout_s=600) as client:
             result_dict = client.infer_batch(**inputs)
