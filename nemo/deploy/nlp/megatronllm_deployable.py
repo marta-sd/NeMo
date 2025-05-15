@@ -115,7 +115,12 @@ class MegatronLLMDeploy:
             )
         else:
             raise Exception("Only NeMo 2.0 checkpoint is supported.")
-
+            
+def dict_to_str(messages):
+    """
+    Serializes dict to str
+    """
+    return json.dumps(messages)
 
 class MegatronLLMDeployableNemo2(ITritonDeployable):
     """
@@ -301,7 +306,7 @@ class MegatronLLMDeployableNemo2(ITritonDeployable):
         return (
             Tensor(name="sentences", shape=(-1,), dtype=bytes),
             Tensor(name="log_probs", shape=(-1,), dtype=np.single),
-            Tensor(name="top_logprobs", shape=(-1,), dtype=np.single),
+            Tensor(name="top_logprobs", shape=(-1,), dtype=bytes),
         )
 
     @batch
@@ -359,7 +364,7 @@ class MegatronLLMDeployableNemo2(ITritonDeployable):
         )
 
         results = self.generate(prompts, inference_params)
-        print("-----------------Results Response----------------", results)
+
         output_texts = [r.generated_text if text_only else r for r in results]
         output_texts = self.remove_eos_token(output_texts)
         output_infer = {"sentences": cast_output(output_texts, np.bytes_)}
@@ -374,7 +379,16 @@ class MegatronLLMDeployableNemo2(ITritonDeployable):
                 else:
                     output_log_probs.append(lp)
             output_infer["log_probs"] = np.array(output_log_probs)
+        if top_logprobs:
+            output_top_n_log_probs = []
+            for r in results:
+                # Convert to torch tensor and then move to cpu as generated_log_probs is a list and cant be moved
+                # to cpu otherwise
+
+                nlp = dict_to_str(r.generated_top_n_logprobs)
+                output_top_n_log_probs.append(nlp)
+    
         if top_logprobs is not None:
-            output_infer["top_logprobs"] = np.array([top_logprobs])
+            output_infer["top_logprobs"] = cast_output(output_top_n_log_probs, np.bytes_)
 
         return output_infer
