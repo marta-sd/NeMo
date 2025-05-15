@@ -115,7 +115,12 @@ class MegatronLLMDeploy:
             )
         else:
             raise Exception("Only NeMo 2.0 checkpoint is supported.")
-
+            
+def dict_to_str(messages):
+    """
+    Serializes dict to str
+    """
+    return json.dumps(messages)
 
 class MegatronLLMDeployableNemo2(ITritonDeployable):
     """
@@ -292,6 +297,7 @@ class MegatronLLMDeployableNemo2(ITritonDeployable):
             Tensor(name="random_seed", shape=(-1,), dtype=np.int_, optional=True),
             Tensor(name="compute_logprob", shape=(-1,), dtype=np.bool_, optional=True),
             Tensor(name="apply_chat_template", shape=(-1,), dtype=np.bool_, optional=True),
+            Tensor(name="n_top_logprobs",  shape=(-1,), dtype=np.int_, optional=True),
         )
         return inputs
 
@@ -300,6 +306,7 @@ class MegatronLLMDeployableNemo2(ITritonDeployable):
         return (
             Tensor(name="sentences", shape=(-1,), dtype=bytes),
             Tensor(name="log_probs", shape=(-1,), dtype=np.single),
+            Tensor(name="top_logprobs", shape=(-1,), dtype=bytes),
         )
 
     @batch
@@ -312,6 +319,7 @@ class MegatronLLMDeployableNemo2(ITritonDeployable):
         "random_seed",
         "compute_logprob",
         "apply_chat_template",
+        "n_top_logprobs",
     )
     def triton_infer_fn(self, **inputs: np.ndarray):
         output_infer = {}
@@ -322,6 +330,7 @@ class MegatronLLMDeployableNemo2(ITritonDeployable):
         num_tokens_to_generate = inputs.pop("max_length", 256)
         log_probs = inputs.pop("compute_logprob", False)
         apply_chat_template = inputs.pop("apply_chat_template", False)
+        top_logprobs = inputs.pop("n_top_logprobs", 1) #Added
         text_only = True
 
         if apply_chat_template:
@@ -351,9 +360,11 @@ class MegatronLLMDeployableNemo2(ITritonDeployable):
             top_p=top_p,
             num_tokens_to_generate=num_tokens_to_generate,
             return_log_probs=log_probs,
+            top_n_logprobs=top_logprobs, #Added (INT)
         )
 
         results = self.generate(prompts, inference_params)
+
         output_texts = [r.generated_text if text_only else r for r in results]
         output_texts = self.remove_eos_token(output_texts)
         output_infer = {"sentences": cast_output(output_texts, np.bytes_)}
@@ -368,5 +379,16 @@ class MegatronLLMDeployableNemo2(ITritonDeployable):
                 else:
                     output_log_probs.append(lp)
             output_infer["log_probs"] = np.array(output_log_probs)
+        if top_logprobs:
+            output_top_n_log_probs = []
+            for r in results:
+                # Convert to torch tensor and then move to cpu as generated_log_probs is a list and cant be moved
+                # to cpu otherwise
+
+                nlp = dict_to_str(r.generated_top_n_logprobs)
+                output_top_n_log_probs.append(nlp)
+    
+        if top_logprobs is not None:
+            output_infer["top_logprobs"] = cast_output(output_top_n_log_probs, np.bytes_)
 
         return output_infer
